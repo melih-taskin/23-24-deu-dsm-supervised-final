@@ -1,0 +1,890 @@
+---
+title: "DSM5007-Denetimli İstatistiksel Öğrenme-Final"
+author: "Melih TAŞKIN - 2023900106"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document
+---
+
+```{r, include=FALSE}
+### Gerekli kütüphane yükleme
+required_packages <- c(
+  "ROCR", "pROC", "klaR", "heplots", "devtools", "MASS", "rms", "car",
+  "ggplot2", "psych", "data.table", "nortest", "tree", "lmtest",
+  "rpart", "randomForest", "rpart.plot", "dplyr", "e1071", "caret", "ipred"
+)
+
+missing_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+for (package_name in required_packages) {
+  if (!require(package_name, character.only = TRUE)) {
+    install.packages(package_name)
+    library(package_name, character.only = TRUE)
+  }
+}
+library("ROCR")
+library("pROC")
+library(klaR)
+library(heplots)
+library(devtools)
+library(MASS)
+library(rms)
+library(car)
+library(ggplot2)
+library("psych")
+library(data.table)
+library(nortest)
+library(tree)
+library(lmtest)
+library(rpart)
+library(randomForest)
+library(rpart.plot)
+library(dplyr)       #for data wrangling
+library(e1071)       #for calculating variable importance
+library(caret)       #for general model fitting
+library(rpart)       #for fitting decision trees
+library(ipred)       #for fitting bagged decision trees
+```
+ 
+\begin{center}
+  \section*{REGRESYON}
+\end{center}
+
+2052 isimli(numaralı) satırda `Height` değeri 1.3 girilmiş, yanlışlık olduğunu düşündüğüm için 0.13 olarak değiştirdim. 1258 ve 3997 numaralı satırlardaki `Height` değişkeninin 0 olamayacağını düşündüğüm için bu satırları çıkarmayı tercih ediyorum. `Sex` değişkeni için `I` olmayanların yani `F` ve `M` dağılımlarının `Rings` değişkenine göre dağılımlarının benzer olması ve doğrusal regresyon modelini kurarken `I` anlamlı çıkarken diğerlerinin anlamsız çıkması üzerine `Sex` değişkeninin içeriğini `I` ve `NI` olarak düzenledim. Bu düzenlemeyi yaparken modellerin performansları üzerine incelemeler gerçekleştirdim ve doğrusal regresyon modelimde ciddi bir artış gözlemlerken diğer modellerimde değişim görmedim diyebilirim fakat gözümden kaçmış olabilecek $10^{-3}$. terimde gerçekleşmiş olabilir(R-squared için). Bu işlemleri hiyerarşik olarak yapmadığım için karşılaştırma durumları raporda ve kod dosyaları arasında bulunmamakta.
+```{r, echo=TRUE}
+abalone <- read.csv("C:/Users/melih/Documents/DSM5007-Final/abalone_veriseti.data")
+abalone$Sex <- ifelse(abalone$Sex == "I", abalone$Sex, "NI")
+abalone$Sex <- factor(abalone$Sex, levels = c("NI","I"))
+abalone$Rings <- as.integer(abalone$Rings)
+abalone$Height[2052] = 0.130
+abalone <- abalone[-c(1258,3997), ]
+```
+```{r, echo=FALSE, include=FALSE}
+set.seed(106)
+train_index <- sample(1:nrow(abalone), 0.7 * nrow(abalone))
+train_abalone <- abalone[train_index, ]
+test_abalone <- abalone[-train_index, ]
+str(train_abalone)
+```
+## 1-Doğrusal regresyon (LM)
+ 
+  - $H_{0}:$ Katsayı sıfırdır.
+  
+  - $H_{1}:$ Katsayı sıfırdan farklıdır.
+  
+```{r,echo=TRUE}
+lm_model <- lm(Rings~.+I(Length^2), data = train_abalone)
+summary(lm_model)
+```
+  
+p-değeri, önem düzeyi $0.05$'ten küçük olan değişkenler için, $H_{0}$ hipotezi reddedilir, $0.05$'ten büyük olan değişkenler için $H_{0}$ hipotezini reddedemeyiz.
+
+Oluşturduğum modelde anlamsız katsayılara sahip değişkenler bulunmamaktadır.
+
+**Varsayım 1: Lineerlik** 
+```{r, eval=FALSE, echo=FALSE}
+pairs.panels(train_abalone)
+```
+
+Korelasyon katsayısının 0 olduğu durumlar olmadığı için bu varsayım sağlanmaktadır. `Rmd` dosyasında uygun kod satırı mevcuttur.
+
+**Varsayım 2: Hataların Normal Dağılımı**
+
+  - $H_{0}:$ Hatalar normal dağılmaktadır.
+  
+  - $H_{1}:$ Hatalar normal dağılmamaktadır.
+  
+```{r, echo=FALSE}
+shapiro.test(lm_model$residuals)
+```
+
+Shapiro-Wilk testi sonucunda p-değeri $0.05$'ten küçük çıktığı için $H_{0}$ hipotezimizi reddederiz. Dolayısıyla `lm_model` modelinin hataları normal dağılmamaktadır.
+
+**Varsayım 3: Homojen Varyans**
+
+  - $H_{0}:$ Hatalar homojen varyansa sahiptir.
+  
+  - $H_{1}:$ Hatalar homojen varyansa sahip değildir.
+  
+```{r, echo= FALSE, fig.align='center'}
+bptest(lm_model)
+```
+ 
+Breusch-Pagan testi sonucunda p-değeri, $a=0.05$ anlamlılık düzeyinden küçük olduğu için, $H_{0}$ hipotezi reddedilir. Dolayısıyla `lm_model` modeli için homojen varyans varsayımı ihlal edilmiştir.
+
+Doğrusal modelimiz için gerekli varsayımlar sağlanmamaktadır. Bu varsayımları sağlanması için gerekli dönüşümler ve uygulamalar yapılabilir fakat, hataların normal dağılımı testi ve varyans testi çok küçük değer çıkmış olduğu için bu varsayımları sağlarken veri kaybı yaşayacağımı düşünüyorum. Bu sebepten dolayı tahmin performansının düşük olmasını göze alarak, diğer modelleri kurup tahmin performanslarını karşılaştırma sonucunda aradaki farkın az olması durumunda bu geliştirmeleri yapmayı düşünüyordum, hataların normal dağıldığı ve homojen varyanslılık varsayımlarını kanıtlayamadığım için, değişkene anlamlılık kazandırması amacıyla `Length` değişkeninin karesini aldım ve bunu yaparken oluşturduğum diğer doğrusal modellerin performanslarıyla karşılaştırdım. Şu haliyle en iyi performansı göstermektedir.
+
+```{r, echo=FALSE}
+# Train ve test verileri üzerinde tahmin yap
+train_predictions <- predict(lm_model, newdata = train_abalone)
+test_predictions <- predict(lm_model, newdata = test_abalone)
+
+# Tahmin gücünü değerlendirme metriklerini hesapla
+evaluate_metrics <- function(actual, predicted, dataset) {
+  rmse <- sqrt(mean((actual - predicted)^2))
+  mae <- mean(abs(actual - predicted))
+  r_squared <- 1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+  
+  return(data.table(Dataset = dataset, RMSE = rmse, MAE = mae, R_squared = r_squared))
+}
+
+# Eğitim verisi için metrikleri hesapla
+train_metrics <- evaluate_metrics(train_abalone$Rings, train_predictions, "Train")
+
+# Test verisi için metrikleri hesapla
+test_metrics <- evaluate_metrics(test_abalone$Rings, test_predictions, "Test")
+
+# Metrikleri bir tablo içinde birleştir
+results_table <- rbindlist(list(train_metrics, test_metrics), fill = TRUE)
+
+# Tabloyu yazdır
+print(results_table)
+```
+
+Şu haliyle doğrusal modelimizin eğitim verisine aşırı uyumu gözlenmemektedir.
+
+# 2-Regresyon Ağacı (RT)
+
+Regresyon Ağacı oluştururken `rpart` kütüphanesinden yardım alma sebebim, özet çıktısını tek bir fonksiyon yardımıyla vermesi ve oluşturulan ağaç hakkında daha detaylı bilgileri bize sunabiliyor olmasından dolayı. Bu işlem sonucunda herhangi bir budama veya iyileştirme yapılmadığı haliyle `tree` fonksiyonuyla aynı sonucu vermektedir. 
+
+Bu özet çıktıda CP değerleri, değişkenlerin önemi ve düğümler hakkında bilgiler mevcuttur. Rapor içerisinde özet bilgiye yer vermedim, yorumlamamı grafik üzerinden yapmayı uygun buldum. 
+
+```{r, warning=FALSE}
+rt_model <- rpart(Rings ~ ., data = train_abalone)
+```
+
+```{r, warning=FALSE, include=FALSE}
+summary(rt_model)
+```
+
+Bir diğer önemli mevzu olan budama işlemlerini yaptım ve test verisi üzerinde tahminleme performansında düşüş yani `R-squared` değerinde düşüş ve `MSE`, `MAE`, `RMSE` değerlerinde artış gözlemledim. Aşağıdaki tablo içerisindeki metrikler budanmamış regresyon ağacı üzerinden hesaplanmıştır.
+
+```{r, echo=FALSE}
+set.seed(106)
+# Train ve test verileri üzerinde tahmin yap
+train_predictions <- predict(rt_model, newdata = train_abalone)
+test_predictions <- predict(rt_model, newdata = test_abalone)
+
+# Eğitim verisi için metrikleri hesapla
+train_metrics <- evaluate_metrics(train_abalone$Rings, train_predictions, "Train")
+
+# Test verisi için metrikleri hesapla
+test_metrics <- evaluate_metrics(test_abalone$Rings, test_predictions, "Test")
+
+# Metrikleri bir tablo içinde birleştir
+results_table <- rbindlist(list(train_metrics, test_metrics), fill = TRUE)
+
+# Tabloyu yazdır
+print(results_table)
+```
+
+Eğitim veri seti ve test veri seti üzerinden modelin metriklerine baktığımda, R-Squared değerleri bağımlı değişkenin varyansının yarısını dahi açıklayamamış olması, çok iç açıcı bir durum değil fakat amacımız diğer modellerle karşılaştırmak olduğu için burada sadece aşırı uyma durumu gözükmemekte diyebilirim. 
+
+Regresyon ağacını açıklamayı uzatmamak ve kolaylık olması için, budama işlemi yapıyorum ve `rt_model` özetindeki cp değerlerini inceledikten sonra budamak için cp değerini 0.02'den seçtim. 
+
+```{r, fig.height=3.5}
+pruned_rt_model <- prune(rt_model, cp = 0.02)
+rpart.plot(pruned_rt_model, type = 2, extra = 101)
+```
+
+* Kurutulmuş deniz kabuğu ağırlığı 0.17 gramdan düşükken halka sayısının 7.5 olması beklenir. 0.17 gramdan büyükse halka sayısının 11 olması beklenir.
+
+* Kurutulmuş kabuk ağırlığı 0.072 gramdan küçükken halka sayısının 6 olması beklenirken, 0.072 ile 0.17 gram arasındaysa halka sayısının 8.4 adet olması beklenir.
+
+* 0.17 ile 0.26 gram arasında kabuk ağırlığına sahip olunması durumunda halka sayısı 10 adet beklenir. 
+
+* Yine kabuk ağırlığı 0.26 ile 0.37 aralığında olması durumunda halka sayısı 11 beklenirken, eğer bu aralıktaki örneklerin;
+  
+  - Et ağırlığı 0.44 gramdan büyük ya da eşitse halka sayısı 10 adet beklenir.
+  
+  - Et ağırlığı 0.44 gramdan küçükse halka sayısının 13 olması beklenir.
+  
+* Kurutulmuş kabuk ağırlığının 0.37 gramdan büyük olması durumundaysa halka sayısının 13 olması beklenir.
+
+
+
+# 3-Bagging ile regresyon ağacı (BRT)
+
+```{r}
+set.seed(106)
+brt_model <- randomForest(formula = Rings ~ .,
+                          data = train_abalone,
+                          ntree = 50,
+                          mtry = 8, importance = TRUE)
+```
+
+Bagging modeli oluştururken, random foresttan ayıran en önemli özellik, `mtry` değeri bağımsız değişken sayısının tamamıdır. `ntree` değeriyle ağaç sayısını 50 aldım.
+
+```{r}
+brt_model
+```
+
+Oluşturduğum `brt_model` için, ağaç sayısı 50, ve mtry sayısı 8'dir. Hataların karelerinin ortalama değeri 4.695049 alırken bu modelin bağımlı değişkenin varyansının %51.71'i model tarafından açıklandığını gösterir.
+
+```{r, include=FALSE}
+brt_model$importance
+```
+
+```{r, echo=FALSE}
+set.seed(106)
+# Train ve test verileri üzerinde tahmin yap
+train_predictions <- predict(brt_model, newdata = train_abalone)
+test_predictions <- predict(brt_model, newdata = test_abalone)
+
+# Eğitim verisi için metrikleri hesapla
+train_metrics <- evaluate_metrics(train_abalone$Rings, train_predictions, "Train")
+
+# Test verisi için metrikleri hesapla
+test_metrics <- evaluate_metrics(test_abalone$Rings, test_predictions, "Test")
+
+# Metrikleri bir tablo içinde birleştir
+results_table <- rbindlist(list(train_metrics, test_metrics), fill = TRUE)
+
+# Tabloyu yazdır
+print(results_table)
+```
+
+Aşırı uyma durumunu kontrol etmek isterken ağaç sayısına göre gözlemledim, fakat açıklanabilen varyansta ve test r-squaredde karşılaşılan değişimlerden dolayı ağaç sayısını 50 olarak tercih ettim. Şu haliyle, aşırı uyum varlığından söz edilebilir. Amacımız hangi modelin daha başarılı olduğunu bulmak olduğu için, bu durumu şimdilik gözardı ediyorum.
+
+
+```{r, warning=FALSE}
+varImpPlot(brt_model)
+```
+
+`ShellWeight` değişkeni, her iki metrikte de yüksek skorları elde etmiş. Bu, `ShellWeight` değişkenin modelde önemli olduğunu ve tahminlerin çoğunu etkilediğini gösteriyor.
+
+`ShuckedWeight` değişkeni, özellikle IncNodePurity(Düğüm Saflığı Artışı) metriğinde `ShellWeight` değişkeninin hemen ardından geliyor. Bu,`ShuckedWeight` değişkenin modelin ağaçlarında düğümleri daha etkili bir şekilde böldüğünü ve sınıfları iyi ayırdığını gösteriyor.
+
+Diğer değişkenler de modelde belirli bir öneme sahiptir, ancak `ShellWeight` ve `ShuckedWeight` bu ölçümlerde daha belirgin bir etkiye sahiptir.
+
+En fazla etkili olan 4 değer ikisi için de aynıdır ve bunlar; `ShuckedWeight`, `ShellWeight`, `VisceraWeight`, `WholeWeight`.
+
+# 4-Rassal Ormanlar Regresyonu (RFR)
+```{r}
+set.seed(106)
+rfr_model <- randomForest(formula = Rings ~ .,
+                          data = train_abalone,
+                          mtry = 3, #p/3
+                          importance = TRUE)
+```
+
+```{r}
+rfr_model
+```
+```{r, include=FALSE}
+rfr_model$importance
+```
+Değişken sayısı/3 işlemi sonucunda elde ettiğim en yakın tam sayı değeri 3 olduğu için, mtry değerini 3'e eşitledim.
+
+Hataların karelerinin ortalama değeri 4.572395 alırken bu modellin bağımlı değişkenin varyansının %55.53'ü model tarafından açıklandığını gösterir.
+```{r, fig.align='center'}
+varImpPlot(rfr_model)
+```
+
+`ShellWeight` değişkeni, her iki metrikte de yüksek skorlara sahip olduğu için modelde en önemlilerden olduğu görülmekte ve tahminlerin çoğunu etkilemektedir.
+
+`ShuckedWeight` ve `ShellWeight` değişkenleri, diğer değişkenlere göre modelde ve tahminlerde daha önemli bir yere sahiptir.
+
+`Sex` değişkeni düğümde kullanılma durumu en düşük olmasına rağmen, tahminlerde önemli bir etkiye sahiptir.
+
+```{r, echo=FALSE}
+set.seed(106)
+# Train ve test verileri üzerinde tahmin yap
+train_predictions <- predict(rfr_model, newdata = train_abalone)
+test_predictions <- predict(rfr_model, newdata = test_abalone)
+
+# Eğitim verisi için metrikleri hesapla
+train_metrics <- evaluate_metrics(train_abalone$Rings, train_predictions, "Train")
+
+# Test verisi için metrikleri hesapla
+test_metrics <- evaluate_metrics(test_abalone$Rings, test_predictions, "Test")
+
+# Metrikleri bir tablo içinde birleştir
+results_table <- rbindlist(list(train_metrics, test_metrics), fill = TRUE)
+
+# Tabloyu yazdır
+print(results_table)
+```
+Bu sonuca göre modelin eğitim setine aşırı uyma durumu olduğunu söyleyebileceğimi düşünüyorum.
+
+# 5-Karşılaştırma
+
+```{r}
+set.seed(106)
+# Test seti üzerinde tahminler yap
+lm_tahminler <- predict(lm_model, newdata = test_abalone)
+rt_tahminler <- predict(rt_model, newdata = test_abalone)
+brt_tahminler <- predict(brt_model, newdata = test_abalone)
+rfr_tahminler <- predict(rfr_model, newdata = test_abalone)
+```
+```{r, include=FALSE}
+# MAE (Mean Absolute Error) fonksiyonu
+mae <- function(y_true, y_pred) {
+  return(mean(abs(y_true - y_pred)))}
+# R-squared fonksiyonu
+rsq <- function(y_true, y_pred) {
+  return(1 - sum((y_true - y_pred)^2) / sum((y_true - mean(y_true))^2))}
+# RMSE (Root Mean Squared Error) fonksiyonu
+rmse <- function(y_true, y_pred) {
+  return(sqrt(mean((y_true - y_pred)^2)))}
+# R-squared değerleri
+lm_rsq <- rsq(test_abalone$Rings, lm_tahminler)
+rt_rsq <- rsq(test_abalone$Rings, rt_tahminler)
+brt_rsq <- rsq(test_abalone$Rings, brt_tahminler)
+rfr_rsq <- rsq(test_abalone$Rings, rfr_tahminler)
+# Performansları karşılaştır
+lm_mse <- mean((test_abalone$Rings - lm_tahminler)^2)
+rt_mse <- mean((test_abalone$Rings - rt_tahminler)^2)
+brt_mse <- mean((test_abalone$Rings - brt_tahminler)^2)
+rfr_mse <- mean((test_abalone$Rings - rfr_tahminler)^2)
+# MAE ve RMSE hesaplamaları
+lm_mae <- mae(test_abalone$Rings, lm_tahminler)
+rt_mae <- mae(test_abalone$Rings, rt_tahminler)
+brt_mae <- mae(test_abalone$Rings, brt_tahminler)
+rfr_mae <- mae(test_abalone$Rings, rfr_tahminler)
+lm_rmse <- rmse(test_abalone$Rings, lm_tahminler)
+rt_rmse <- rmse(test_abalone$Rings, rt_tahminler)
+brt_rmse <- rmse(test_abalone$Rings, brt_tahminler)
+rfr_rmse <- rmse(test_abalone$Rings, rfr_tahminler)
+```
+```{r}
+performans_tablosu <- data.frame(Method = c("Doğrusal Regresyon", "Regresyon Ağacı",
+                                            "Bagging ile Regresyon Ağacı", "Rassal Ormanlar"),
+                                  R_squared = c(lm_rsq, rt_rsq, brt_rsq, rfr_rsq),
+                                  MSE = c(lm_mse, rt_mse, brt_mse, rfr_mse),
+                                  MAE = c(lm_mae, rt_mae, brt_mae, rfr_mae),
+                                  RMSE = c(lm_rmse, rt_rmse, brt_rmse, rfr_rmse))
+sira_indeks <- order(performans_tablosu$R_squared, decreasing = TRUE)
+performans_tablosu <- performans_tablosu[sira_indeks, ]
+print(performans_tablosu)
+```
+
+Tabloyu açıklamadan önce veri üzerinde ve modeller üzerinde bir çok deneme yaptığımı ve en basit ve uygun gördüğüm haliyle modelleri oluşturduğumu belirtmek isterim. Ayrıca her model için aşırı uyma durumu kontrollerini modelleri oluşturduktan sonra inceledim. Test seti üzerinden R-squared değeri eğitime göre yüksek olan sadece doğrusal regresyon modeli var.
+Yazdığım yorumlar ve karşılaştırmalar sadece bu veri seti özelindedir.
+
+R-squared değerlerine baktığımızda doğrusal regresyon modelimizin varsayımları sağlamıyor olmasına rağmen test verisi üzerinde başarılı tahminlerde bulunması ve bunu eğitim setine göre daha başarılı yapmış olması, doğrusal regresyon modelini diğerlerine göre bir adım ön plana çıkarıyor. Rassal ormanlar modeli eğitim esnasında iyi bir öğrenme değerine sahip fakat test verisi üzerindeki tahminlemelerinde doğrusal regresyon modelimizden bir tık geride kalmış. 
+
+Regresyon ağacı modeliyse budama yapılmamasına rağmen eğitim seti üzerinden dahi `Rings`'in varyansını açıklamakta başarılı olduğunu söyleyemiyorum, test seti üzerindeki tahminlemeleri de bariz bir şekilde diğerlerine göre en zayıf performansı gösteren model.
+
+Doğrusal regresyon, bagging ve rassal ormanlar modellerinde iyileştirmeler ve geliştirmelerin mümkün olduğunu fakat denediğim bir çok yöntemde rassal ormanlar modelinin test verisi üzerinden tahminleri sonucu R-squared değerinde 0.54 ile 0.565 arasında değiştiğini, doğrusal regresyon modelininse 0.52'lerden şuanki seviyesine getirebildiğimi söylemek isterim. 
+
+Yazdığım durumlarla birlikte bir model üzerinden geliştirmek ve düzenlemeye devam etmek istesem doğrusal regresyon modeli üzerinden geliştirmelerime devam ederim çünkü, eğitim verisinde yüksek öğrenme değerine sahip olmamasına rağmen test setinde yani gerçek hayattaki verileri tahminlemede daha başarılı olduğunu göstermiştir.
+
+\newpage
+\begin{center}
+  \section*{SINIFLANDIRMA}
+\end{center}
+```{r}
+abaloneClass <- read.csv("C:/Users/melih/Documents/DSM5007-Final/abalone_veriseti.data")
+abaloneClass$Rings <- as.integer(abaloneClass$Rings)
+abaloneClass$Height[2052] = 0.130
+abaloneClass <- abaloneClass[-c(1258,3997), ]
+abaloneClass <- na.omit(abaloneClass)
+```
+```{r, echo=FALSE, include=FALSE}
+set.seed(106)
+train_index <- sample(1:nrow(abaloneClass), 0.7 * nrow(abaloneClass))
+train_abaloneClass <- abaloneClass[train_index, ]
+test_abaloneClass <- abaloneClass[-train_index, ]
+str(train_abaloneClass)
+```
+```{r, fig.width = 6, fig.height = 3, echo=FALSE, fig.align='center'}
+boxplot(Rings ~ Sex, data = abaloneClass, main = "Cinsiyet Değişkenine Göre Rings", xlab = "Rings", ylab = "Cinsiyet", horizontal = T)
+```
+```{r, echo=FALSE, fig.height=4, fig.width=6.25}
+# Rings değeri 8'den küçük olanlar
+below_9 <- abalone[abaloneClass$Rings < 8, ]
+# Rings değeri 8'den büyük olanlar
+above_9 <- abalone[abaloneClass$Rings >= 8, ]
+# 8'in altındakilerin cinsiyetlere göre sayısını bulun
+below_9_counts <- table(below_9$Sex)
+# 8'den büyük olanların cinsiyetlere göre sayısını bulun
+above_9_counts <- table(above_9$Sex)
+# Yüzdelik olarak çevirin
+below_9_percent <- prop.table(below_9_counts) * 100
+above_9_percent <- prop.table(above_9_counts) * 100
+# Bar plot çizdirin
+par(mfrow=c(1,2))  # İki grafik yan yana
+barplot(below_9_percent, main="Rings < 8", xlab="Cinsiyet", ylab="Yüzde", col="lightblue")
+text(below_9_percent, labels = paste0(round(below_9_percent, 1), "%"), pos = 3, cex = 0.8, col = "black")
+barplot(above_9_percent, main="Rings >= 8", xlab="Cinsiyet", ylab="Yüzde", col="lightgreen")
+text(above_9_percent, labels = paste0(round(above_9_percent, 1), "%"), pos = 3, cex = 0.8, col = "black")
+```
+
+Cinsiyet değişkenine göre halka sayılarının dağılımına kutu grafiğine baktığımda; `Infant` özelliği baz alındığında en uygun eşikdeğerinin `Infant` olmayanların 1. çeyrekliğine ve `Infant` olanlarınsa 3. çeyrekliğine denk gelen 9 değerini uygun gördüm. Bu değere göre sınıflandırma yaptım ve etiketlendiği sınıfa ait olmayanların yüzdelik dilimlerine ve sayılarına kutu ve sütun grafiğiyle baktım. Sütun grafiklerine ve elde ettiğim yüzdelik dilimlerine göre eşik değerimi en uygun gördüğüm 8 olarak belirledim.
+
+Yani şu haliyle sınıflandırmamı; eğer halka sayısı 8'den azsa deniz salyangozumuz henüz bebekken, 8 adet veya daha fazla halkası bulunan deniz salyangozumuz bebek değildir. 
+
+Ayrıca sınıflandırmayı bebek ya da bebek değil olarak yapacağımız için veri setimden `Sex` değişkenini çıkardım.
+
+```{r}
+set.seed(106)
+INI <- ifelse(abaloneClass$Rings<8,"Infant","Not Infant")
+abaloneClass <- data.frame(abaloneClass,INI)
+abaloneClass$INI <- as.factor(abaloneClass$INI)
+train_index <- sample(1:nrow(abaloneClass), 0.7 * nrow(abaloneClass))
+abaloneClass <- abaloneClass[,-1]
+train_abaloneClass <- abaloneClass[train_index, ]
+test_abaloneClass <- abaloneClass[-train_index, ]
+str(train_abaloneClass)
+```
+# 6-Sınıflandırma Ağacı(CT)
+
+Budama sonrası `accuracy` değerinde yaklaşık 0.006 artış gördüm.
+```{r, include=FALSE}
+set.seed(106)
+tree.train_abaloneClass <- tree(INI~.-Rings , train_abaloneClass)
+summary(tree.train_abaloneClass)
+```
+
+```{r, include=FALSE}
+plot(tree.train_abaloneClass)
+text(tree.train_abaloneClass, pretty = 0)
+```
+
+```{r, include=FALSE}
+set.seed(106)
+tree.pred <- predict(tree.train_abaloneClass ,test_abaloneClass ,type="class")
+table <- table(tree.pred, test_abaloneClass$INI)
+table
+```
+
+```{r, include=FALSE}
+sum(diag(table))/sum(table)
+```
+
+```{r, echo=FALSE, fig.show='hide'}
+#Cross-validation
+set.seed(106)
+cv.train_abaloneClass <- cv.tree(tree.train_abaloneClass ,FUN=prune.misclass )
+plot(cv.train_abaloneClass$size ,cv.train_abaloneClass$dev ,type="b")
+
+```
+
+```{r}
+set.seed(106)
+tree.train_abaloneClass <- tree(INI~.-Rings , train_abaloneClass)
+ct_model <- prune.misclass(tree.train_abaloneClass,best=2)
+summary(ct_model)
+```
+
+`ct_model` yani pruned classification tree modelim 2 terminal node ile `ShellWeight` değişkeni üzerinden verinin %58'ini açıklama başarısını yaklaşık %11 hata oranıyla elde ettiğini göstermektedir.
+
+```{r, fig.align='center', fig.width=6, fig.height=3}
+plot(ct_model)
+text(ct_model ,pretty =0)
+```
+
+Ağacın yapısına baktığımızda açıkça kabuk ağırlığı 0.13425 gramdan küçükse bebektir, 0.13425 grama eşit ya da büyükse bebek değildir olarak sınıflandırmıştır.
+
+```{r}
+set.seed(106)
+tree.pred <- predict(ct_model ,train_abaloneClass , type="class")
+ct_conf_matrix <- table(tree.pred ,train_abaloneClass$INI)
+ct_conf_matrix
+```
+
+Eğitim verileri üzerinden tahminlerine baktığımızda `Infant` sınıfından olması gereken bireylerin 90 tanesini, `Not Infant` sınıfında olması gereken bireylerdense 250 tanesini yanlış tahmin ettiği gözükmektedir.
+
+```{r}
+sum(diag(ct_conf_matrix))/sum(ct_conf_matrix)
+```
+Doğruluk değerine baktığımızda, `ct_model`inin eğitim veri setindeki gözlemlerin yaklaşık %88'inin sınıfını doğru tahmin ettiğini görüyoruz.
+
+# 7-Bagging ile Sınıflandırma Ağacı (BCT)
+
+```{r}
+set.seed(106) 
+
+bct_model <- randomForest(INI~.-Rings,
+                    data=train_abaloneClass,
+                    mtry=7, 
+                    importance=TRUE)
+```
+
+```{r}
+yhat.bag <- predict(bct_model,newdata=train_abaloneClass) 
+bct_conf_matrix <- table(yhat.bag ,train_abaloneClass$INI)
+bct_conf_matrix
+```
+`bct_model`imin eğtim verisi üzerinde hatasız tahminleme yaptığı gözükmektedir.
+
+```{r}
+sum(diag(bct_conf_matrix))/sum(bct_conf_matrix)
+```
+`bct_model`inin eğitim seti üzerinden doğruluk oranı %100'dür.
+
+```{r, include=FALSE}
+bct_model$importance
+```
+```{r}
+varImpPlot(bct_model)
+```
+
+`MeanDecreaseAccuracy` değerlerine göre `ShellWeight` değişkeni sınıflandırmanın doğruluğuna çok büyük katkı yaparken `Diameter` değişkeni onun hemen ardından diğer değişkenlere göre daha fazla fakat çok büyük diyemeyeceğimiz katkısının olduğunu söyleyebiliriz.
+
+`MeanDecreaseGini` yani ağacın saflığına olan katkılara baktığımızda `ShellWeight` değişkeni çok büyük bir katkıda bulunmuş ve diğer değişkenlere göre açık bir fark oluşturduğu gözükmekte.
+
+# 8-Rassal Ormanlarla Sınıflandırma(RFC)
+
+```{r}
+set.seed(106) 
+rfc_model <- randomForest(INI~.-Rings,
+                          data=train_abaloneClass,
+                          mtry=2,
+                          importance=TRUE)
+```
+
+```{r}
+yhat.rfc <- predict(rfc_model,newdata=train_abaloneClass) 
+rfc_conf_matrix <- table(yhat.rfc ,train_abaloneClass$INI)
+rfc_conf_matrix
+```
+Rassal ormanlarla sınıflandırma modelim eğitim verisi üzerinde tahminlemeleri hatasızdır.
+
+```{r}
+sum(diag(rfc_conf_matrix))/sum(rfc_conf_matrix)
+```
+`rfc_model`inin eğitim verisi üzerinde doğruluk oranı %100'dür.
+
+```{r, include=FALSE}
+rfc_model$importance
+```
+
+```{r}
+varImpPlot(rfc_model)
+```
+
+Ağacın saflığına en çok etki eden iki değişkenimiz `ShellWeight` ve `WholeWeight` değişkenleriyken, sınıflandırma doğruluğuna en çok katkıda bulunan üç değişkenimiz `ShellWeight`, `ShuckedWeight` ve `Diameter` değişkenlerimizdir.
+
+# 9-Lojistik Regresyon(LR)
+  
+```{r}
+set.seed(106)
+lr_model <- glm(INI~.-WholeWeight-VisceraWeight-Rings-Length, 
+                data=train_abaloneClass, 
+                family = binomial)
+summary(lr_model)
+```
+  - Model, şu haliyle anlamsız katsayı bulundurmamaktadır.
+  
+```{r}
+set.seed(106)
+vif(lr_model)
+```
+  - Çoklu doğrusal bağlantı yoktur.
+  
+```{r}
+set.seed(106)
+durbinWatsonTest(lr_model)
+```
+  
+  - $H_{0}$ hipotezi otokorelasyon(gözlemler arasında lineer ilişki) yoktur, hipotezimiz Durbin Watson testi sonucu p-value>0.05 olduğu için reddedilemez. Dolayısıyla gözlemler birbirinden bağımsızdır.
+
+
+```{r}
+nrow(train_abaloneClass)
+```
+  
+  - 4 bağımsız değişken üzerinden kurduğum lojistik regresyon modeli için örneklem genişliğimiz yeterince fazladır, dolayısıyla bu varsayım da sağlanmış olur.
+  
+```{r, echo=FALSE,fig.align='center'}
+set.seed(106)
+# Tahminleri al
+predicted_probs <- predict(lr_model, type = "response")
+# Log-odds dönüşümü
+log_odds <- log(predicted_probs / (1 - predicted_probs))
+# Bağımsız değişkenler için grafik kontrolü
+par(mfrow = c(2, 2))  # Grafikleri 2x2 bir düzen içinde yerleştir
+# Diameter
+plot(train_abaloneClass$Diameter, log_odds, main = "Diameter vs. Log-Odds", xlab = "Diameter", ylab = "Log-Odds")
+# Height
+plot(train_abaloneClass$Height, log_odds, main = "Height vs. Log-Odds", xlab = "Height", ylab = "Log-Odds")
+# ShuckedWeight
+plot(train_abaloneClass$ShuckedWeight, log_odds, main = "ShuckedWeight vs. Log-Odds", xlab = "ShuckedWeight", ylab = "Log-Odds")
+# ShellWeight
+plot(train_abaloneClass$ShellWeight, log_odds, main = "ShellWeight vs. Log-Odds", xlab = "ShellWeight", ylab = "Log-Odds")
+```
+  
+  - Bağımsız değişkenler ile Log-Odds değerleri arasındaki oluşturduğum grafikleri incelediğimizde lineerlik olduğu söylenebilir. Bu durumu test eden istatistik veya kod bulamadığım, bulduklarımdan yorum yapamadığım için grafiklere göre yorumladım. `ShuckedWeight` değişkeni ile Log-Odds değerleri arasındaki ilişkiye bu varsayımı sağlatmama ihtimali olduğunu söyleyebilirim.
+
+```{r}
+set.seed(106)
+lrPredicts <- predict(lr_model, newdata = train_abaloneClass)
+predicted_classes <- ifelse(lrPredicts > 0.5, "Not Infant", "Infant")
+lr_conf_matrix <- table(predicted_classes, train_abaloneClass$INI)
+lr_conf_matrix
+```
+Eğitim seti üzerinden karışıklık matrisine baktığımda `lr_model`im, `Infant` sınıfından olan 118 gözlemi `Not Infant` olarak etiketlerken, 170 gözlemi `Not Infant` sınıfından olmasına rağmen `Infant` sınıfında tahmin etmiş.
+
+```{r}
+set.seed(106)
+sum(diag(lr_conf_matrix)) / sum(lr_conf_matrix)
+```
+Doğruluk değerine baktığımda %90 civarında bir başarısı olduğu söyleyebilirim.
+
+# 10-Doğrusal Ayırma Analizi(LDA)
+
+```{r, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+set.seed(106)
+heplots::covEllipses(train_abaloneClass[,1:7], 
+                     train_abaloneClass$INI, 
+                     fill = TRUE, 
+                     pooled = FALSE, 
+                     col = c("blue", "red"), 
+                     variables = 1:7, 
+                     fill.alpha = 0.05)
+```
+
+Grafiklere baktığımızda tüm değişkenler için neredeyse aynı durum gözüküyor, yani tüm değişkenlerde sınıflandırma için doğrusal ayırma yapılabilir.
+
+```{r}
+set.seed(106)
+lda_model <- lda(INI ~.-Rings-Length-VisceraWeight-Diameter, 
+                 data = train_abaloneClass)
+lda_model
+```
+
+  - **Prior probabilities of groups:**
+    
+    * "Infant" sınıfını içeren gözlemleri eğitim veri setindeki toplam gözlem sayısına göre %19.88 oranında tahmin ediyor.
+    
+    * "Not Infant" sınıfını içeren gözlemleri eğitim veri setindeki toplam gözlem sayısına göre %80.12 oranında tahmin ediyor.
+    
+  - **Group means:** Sınıflarımıza ait grupların ortalamalarını göstermektedir. 
+    
+  - **Coefficients of linear discriminants:** Doğrusal ayrıştırma yönteminde sadece 1 tane ayırma fonksiyonu üretilmiş ve bu doğrusal fonksiyon için katsayıları yazdırılmıştır.
+    
+  
+```{r}
+boxm <- boxM(train_abaloneClass[, 1:7], train_abaloneClass$INI)
+boxm
+```
+  
+  - $H_{0}$ Sonuç değişkeninin kovaryans matrisleri tüm gruplarda eşittir.
+  
+  - $H_{1}$ Sonuç değişkeninin kovaryans matrisleri en az bir grup için farklıdır.
+ 
+p-değeri< 0.05 olduğu için null hipotezi reddedilir. Yani, bu durumda grupların kovaryans matrisleri en az bir grup için farklıdır.
+  
+```{r, fig.width=6,fig.height=4}
+partimat(INI ~.-Rings-Length-VisceraWeight-Diameter, 
+         data=train_abaloneClass,method="lda")
+```
+
+Doğrusal ayırma analizi ile partition matrisine baktığımda hata oranların birbirine çok yakın ve %10 civarında olduğu görülmekte.
+
+```{r, fig.width=5, fig.height=5}
+tahmin_1<-predict(lda_model,train_abaloneClass)
+hist_lda1<-ldahist(data=tahmin_1$x[,1],g=train_abaloneClass$INI, type = "both")
+```
+
+Bu histogram grafiklerine baktığımda ayrışmanın net olmadığı, tahminlerimde yanılabileceğim durumlar olacağı görülüyor.
+
+```{r}
+set.seed(106)
+lda_predictions <- predict(lda_model, newdata = train_abaloneClass)
+lda_conf_matrix <- table(lda_predictions$class, train_abaloneClass$INI)
+lda_conf_matrix
+```
+
+`lda_model`im 179 gözlem için `Infant` sınıfında olması gereken, 114 gözlem için de `Not Infant` sınıfından olması gerekirken yanlış tahminlemiş.
+
+```{r}
+sum(diag(lda_conf_matrix))/sum(lda_conf_matrix)
+```
+`lda_model`imin eğitim verileri üzerinden doğruluk oranı %90 civarında.
+
+# 11-Eğrisel Ayırma Analizi(QDA)
+
+Doğrusal ayırma analizininin ilk başında verdiğim grafiklere baktığımızda tüm değişkenler için neredeyse aynı durum gözüküyor, yani tüm değişkenlerde sınıflandırma için eğrisel ayırma yapılabilir.
+
+```{r}
+set.seed(106)
+qda_model <- qda(INI~.-Rings-WholeWeight-Diameter-ShuckedWeight, 
+                data=train_abaloneClass)
+qda_model
+```
+  - **Prior probabilities of groups:**
+    
+    * "Infant" sınıfını içeren gözlemleri eğitim veri setindeki toplam gözlem sayısına göre %19.88 oranında tahmin ediyor.
+    
+    * "Not Infant" sınıfını içeren gözlemleri eğitim veri setindeki toplam gözlem sayısına göre %80.11 oranında tahmin ediyor.
+    
+  - **Group means:** Sınıflarımıza ait grupların ortalamalarını göstermektedir.
+  
+```{r}
+boxm <- boxM(train_abaloneClass[, c(1,3,6,7)], train_abaloneClass$INI)
+boxm
+```
+  
+  - $H_{0}$ Sonuç değişkeninin kovaryans matrisleri tüm gruplarda eşittir.
+  
+  - $H_{1}$ Sonuç değişkeninin kovaryans matrisleri en az bir grup için farklıdır.
+ 
+p-değeri< 0.05 olduğu için null hipotezi reddedilir. Yani, bu durumda grupların kovaryans matrisleri en az bir grup için farklıdır.
+  
+```{r}
+partimat(INI~.-Rings-WholeWeight-Diameter-ShuckedWeight, 
+                data=train_abaloneClass,method="qda")
+```
+  
+Eğrisel ayırma analiziyle partition matrisine bakıp yüksek olduğu durumlara etki eden değişkenleri modelimden çıkararak `qda_model`imi tekrar kurdum. Farklı sonuçlarla karşılaşmadım ve şu haliyle bıraktım. Buna göre ayırmaya göre hata oranı en fazla  %13.6 ile `VisceraWeight` ve `ShellWeight` arasında gerçekleşen ayırmadadır.
+
+```{r, fig.width=5, fig.height=5}
+set.seed(106)
+qda_predictions <- predict(qda_model, newdata = train_abaloneClass)
+qda_conf_matrix <- table(qda_predictions$class, train_abaloneClass$INI)
+qda_conf_matrix
+```
+Karışıklık matrisine baktığımızda 92 adet `Infant` sınıfında olması gereken, 296 adet de `Not Infant` sınıfında olması gereken gözlem yanlış tahmin edilmiş.
+
+```{r}
+sum(diag(qda_conf_matrix))/sum(qda_conf_matrix)
+```
+Eğrisel ayrıştırma modelim eğitim verileri üzerinde neredeyse %87 doğru tahminler üretmiş.
+
+# 12-ROC ve AUC 
+
+```{r, echo=FALSE}
+test_tree.pred <- predict(ct_model ,test_abaloneClass , type="class")
+ct_conf_matrix_test <- table(test_tree.pred ,test_abaloneClass$INI)
+
+
+test_yhat.bag <- predict(bct_model,newdata=test_abaloneClass) 
+bct_conf_matrix_test <- table(test_yhat.bag ,test_abaloneClass$INI)
+
+test_yhat.rfc <- predict(rfc_model,newdata=test_abaloneClass) 
+rfc_conf_matrix_test <- table(test_yhat.rfc ,test_abaloneClass$INI)
+
+
+test_lrPredicts <- predict(lr_model, newdata = test_abaloneClass)
+predicted_classes <- ifelse(test_lrPredicts > 0.5, "Not Infant", "Infant")
+lr_conf_matrix_test <- table(predicted_classes, test_abaloneClass$INI)
+
+
+test_lda_predicts <- predict(lda_model, newdata = test_abaloneClass)
+lda_conf_matrix_test <- table(test_lda_predicts$class, test_abaloneClass$INI)
+
+test_qda_predicts <- predict(qda_model, newdata = test_abaloneClass)
+qda_conf_matrix_test <- table(test_qda_predicts$class, test_abaloneClass$INI)
+```
+
+```{r, echo=FALSE}
+predct <- prediction(ifelse(test_tree.pred == "Infant", 1, 2),
+                     test_abaloneClass$INI)
+predbag <- prediction(ifelse(test_yhat.bag == "Infant", 1, 2),
+                      test_abaloneClass$INI)
+predrf <- prediction(ifelse(test_yhat.rfc == "Infant", 1, 2),
+                     test_abaloneClass$INI)
+predlr <- prediction(ifelse(test_lrPredicts > 0.5, 2, 1),
+                     test_abaloneClass$INI)
+predlda <- prediction(ifelse(test_lda_predicts$class == "Infant", 1, 2),
+                     test_abaloneClass$INI)
+predqda <- prediction(ifelse(test_qda_predicts$class == "Infant", 1, 2),
+                     test_abaloneClass$INI)
+
+perfct <- performance(predct, "tpr", "fpr")
+perfbag <- performance(predbag, "tpr", "fpr")
+perfrf <- performance(predrf, "tpr", "fpr")
+perflr <- performance(predlr, "tpr", "fpr")
+perflda <- performance(predlda, "tpr", "fpr")
+perfqda <- performance(predqda, "tpr", "fpr")
+
+auc_ct <- ModelMetrics::auc(test_abaloneClass$INI, 
+                            ifelse(test_tree.pred == "Infant", 1, 2))
+
+auc_bag <- ModelMetrics::auc(test_abaloneClass$INI,
+                             ifelse(test_yhat.bag == "Infant", 1, 2))
+
+auc_rf <- ModelMetrics::auc(test_abaloneClass$INI, 
+                            ifelse(test_yhat.rfc == "Infant", 1, 2))
+
+auc_lr <- ModelMetrics::auc(test_abaloneClass$INI, 
+                            ifelse(test_lrPredicts > 0.5, 2, 1),
+                            test_abaloneClass$INI)
+
+auc_lda <- ModelMetrics::auc(test_abaloneClass$INI,
+                             ifelse(test_lda_predicts$class == "Infant",
+                                    1, 2))
+
+auc_qda <- ModelMetrics::auc(test_abaloneClass$INI,
+                             ifelse(test_qda_predicts$class == "Infant", 
+                                    1, 2))
+
+auc_values <- c(auc_ct, auc_bag, auc_rf, auc_lr, auc_lda, auc_qda)
+
+model_names <- c("Sınıflandırma Ağacı", "Bagging ile Sınıflandırma Ağacı",
+                 "Rassal Ormanlar ile Sınıflandırma Ağacı",
+                 "Lojistik Regresyon", 
+                 "LDA", "QDA")
+
+# AUC değerlerini sırala ve sıralama indekslerini al
+sorted_indices <- order(auc_values, decreasing = TRUE)
+sorted_auc_values <- auc_values[sorted_indices]
+sorted_model_names <- model_names[sorted_indices]
+```
+
+
+```{r, echo=FALSE, dpi=500}
+plot(perfct, col = "darkcyan", lwd = 3, main = "ROC Eğrisi")
+plot(perfbag, add = TRUE, col = "darksalmon", lwd = 3)
+plot(perfrf, add = TRUE, col = "burlywood3", lwd = 3)
+plot(perflda, add = TRUE, col = "coral1", lwd = 3)
+plot(perfqda, add = TRUE, col = "darkgrey", lwd = 3)
+plot(perflr, add = TRUE, col = "dodgerblue3", lwd = 3)
+
+legend("bottomright", legend = paste(sorted_model_names, round(sorted_auc_values, 3), sep = " - AUC: "), 
+       col = c("darkcyan", "darksalmon", "burlywood3", 
+               "coral1", "darkgrey", "dodgerblue3"), 
+       lwd = 3, cex = 0.5,
+       title = "Model-AUC") 
+
+```
+
+ROC (Receiver Operating Characteristic) eğrisi, sınıflandırma modellerinin performansını değerlendirmek için kullanılan bir grafiksel araçtır. Bu eğri, modelin hassasiyet (sensitivity) ve özgüllük (specificity) performansını görsel olarak gösterir.
+
+Eğri altında kalan alan (AUC - Area Under the Curve), modelin sınıflandırma yeteneğini ölçen bir değerdir. AUC değeri 1'e ne kadar yakınsa, modelin performansı o kadar iyidir.
+
+Her model için karışıklık matrisi ve doruluk değerlerine modele ait bölümlerde incelediğim için, eğrilerimi test seti üzerinden yaptırdığım tahminlere göre çizdirdim. Çizimi yaptırırken kullandığım kodlar `.rmd` dosyasında mevcuttur. Buna göre test setinde en iyi tahmin yapan modelim sınıflandırma ağacı modelim yani `ct_model` modeli. Legend içerisinde `AUC` değerlerine göre en yüksekten en düşüğe sıralı şekilde verilmiştir. 
+
+# 13-Karşılaştırma
+
+```{r}
+test_matrixes <- list(ct_conf_matrix_test,
+                      bct_conf_matrix_test,
+                      rfc_conf_matrix_test,
+                      lr_conf_matrix_test,
+                      lda_conf_matrix_test,
+                      qda_conf_matrix_test)
+
+accuracies <- sapply(test_matrixes, 
+                     function(matris) 
+                       sum(diag(matris))/sum(matris))
+
+model_names <- c("Sınıflandırma Ağacı", "Bagging ile Sınıflandırma Ağacı",
+                 "Rassal Ormanlar ile Sınıflandırma Ağacı",
+                 "Lojistik Regresyon", 
+                 "LDA", "QDA")
+
+accuracy_table <- data.frame(Model = model_names, 
+                             Accuracy = unlist(accuracies))
+
+order_indices <- order(accuracy_table$Accuracy, decreasing = TRUE)
+
+accuracy_table <- accuracy_table[order_indices, ]
+
+accuracy_table
+```
+
+Test verileri üzerinden yapılan tahminlemelerin doğruluk değerlerine bakıldığında, tahmin performansı en iyi olan %88.8 ile Bagging ile Sınıflandırma Ağacı modeli ve onun hemen ardından %88.4 ile Rassal Ormanlar geliyor. Fakat bu modellerin her ikisi de eğitim setindeki doğruluk değerleri %100'ken test setinde başarısında ciddi bir düşüş yaşamış.
+
+Lojistik Regresyon modelimiz eğitim seti üzerinde %90 başarılı tahminler yaparken test setindeki tahminleri %88.2 civarındadır. BCT ve RFC modellerine göre performans düşüşü daha az gerçekleşmiş.
+
+Sınıflandırma Ağacı modelim eğitim verileri üzerinde %88 civarında doğruluk değerini yakalarken, test verilerinden yaklaşık %87'sini doğru tahmin etmiş.
+
+LDA ve QDA için varsayımların sağlanmasında emin olmadığım durumlar var. LDA ve QDA modellerimin performansları karşılaştırdığımda, QDA'nın daha başarısız olmasının sebebi modelimi farklı değişkenlerle kurmuş olmamdan kaynaklandığını söyleyebilirim. 
+
+Eğitim ve test verileri üzerinden modellerin performanslarına baktığımda aşırı öğrenme durumunun bulunmasını istemediğim için, Lojistik Regresyon modelim yani `lr_model` modelimi diğerlerine göre daha başarılı buldum.
